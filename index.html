@@ -119,6 +119,9 @@
   header p {
     font-size: 14.5px; color: var(--ink-soft); margin: 0; max-width: 60ch;
   }
+  header .privacy-note {
+    font-size: 12px; color: var(--ink-faint); margin: 8px 0 0; max-width: 60ch;
+  }
   .brand {
     display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
   }
@@ -277,6 +280,7 @@
   <div class="eyebrow">HOJA DE DATOS PROFESIONAL</div>
   <h1>Ficha de la obra</h1>
   <p>Rellena lo que sepas en cada hueco. Hay opciones que ya vienen marcadas con un valor habitual — cámbialo cuando sea distinto.</p>
+  <p class="privacy-note">Tus datos se guardan según los vas rellenando, para poder tramitar tu instalación.</p>
 </header>
 
 <main>
@@ -587,6 +591,71 @@
   }
   document.addEventListener("scroll", updateProgress, { passive: true });
   updateProgress();
+
+  // ---- live sync to Google Sheets (captures partial fills, not just sends) ----
+  // SYNC_URL is the Apps Script Web App URL (see Scripts/apps-script-backend/Code.gs).
+  // Left blank until deployed — sync is silently skipped until then, so the
+  // form still works standalone with no backend configured.
+  var SYNC_URL = "";
+  var TEXT_FIELD_IDS = [
+    "f-fecha", "f-dni", "f-nombre", "f-correo", "f-tel", "f-cc",
+    "f-catastral", "f-x", "f-y", "f-cups", "f-cau", "f-potc", "f-poto", "f-potd",
+    "f-obra", "f-presupuesto",
+    "fv-inv", "fv-mod", "fv-pot", "fv-prot", "fv-az", "fv-otros"
+  ];
+  var sessionId = (function () {
+    var k = "cie_bt_ficha_session_id";
+    var existing = sessionStorage.getItem(k);
+    if (existing) return existing;
+    var id = "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+    sessionStorage.setItem(k, id);
+    return id;
+  })();
+  var firstSeenAt = new Date().toISOString();
+
+  function collectAllFieldValues() {
+    var out = { sessionId: sessionId, primera_vez: firstSeenAt, ultima_actualizacion: new Date().toISOString() };
+    TEXT_FIELD_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) out[id] = el.value.trim();
+    });
+    ROWS.forEach(function (row) {
+      var v = state[row.key];
+      if (v) out[row.key] = v;
+      var extra = state[row.key + "_EXTRA"];
+      if (extra) out[row.key + "_EXTRA"] = extra;
+    });
+    return out;
+  }
+
+  var syncTimer = null;
+  function scheduleSync() {
+    if (!SYNC_URL) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(sendSync, 900);
+  }
+  function sendSync(useBeacon) {
+    if (!SYNC_URL) return;
+    var payload = JSON.stringify(collectAllFieldValues());
+    if (useBeacon && navigator.sendBeacon) {
+      navigator.sendBeacon(SYNC_URL, new Blob([payload], { type: "text/plain;charset=utf-8" }));
+    } else {
+      fetch(SYNC_URL, { method: "POST", mode: "no-cors", body: payload, keepalive: true }).catch(function () {});
+    }
+  }
+
+  document.addEventListener("input", function (e) {
+    if (e.target && (e.target.matches('input[type="text"], input[type="email"], input[type="tel"], textarea') || TEXT_FIELD_IDS.indexOf(e.target.id) !== -1)) {
+      scheduleSync();
+    }
+  });
+  document.getElementById("groups-instalacion").addEventListener("click", function (e) {
+    if (e.target && e.target.classList.contains("pill")) scheduleSync();
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") sendSync(true);
+  });
+  window.addEventListener("pagehide", function () { sendSync(true); });
 })();
 </script>
 
