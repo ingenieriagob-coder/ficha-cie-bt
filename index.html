@@ -18,7 +18,7 @@
 <meta name="twitter:title" content="Hoja de datos profesional">
 <meta name="twitter:description" content="Formulario para tomar los datos de un cliente en obra, de INGEGOB S.L.P.">
 <meta name="twitter:image" content="og-image.png">
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 </head>
 <body>
 <style>
@@ -553,72 +553,190 @@
     return false;
   }
 
-  // ---- Excel export (same field list as buildSummary, flat rows for fast reading) ----
-  function collectXlsxRows() {
-    var rows = [];
-    function add(label, v) { if (v) rows.push([label, v]); }
-    add("Fecha", val("f-fecha"));
-    add("DNI/NIF/CIF", val("f-dni"));
-    add("Nombre", val("f-nombre"));
-    add("Correo", val("f-correo"));
-    add("Teléfono", val("f-tel"));
-    add("N.º cuenta", val("f-cc"));
-    add("Ref. catastral", val("f-catastral"));
-    add("Coordenada X", val("f-x"));
-    add("Coordenada Y", val("f-y"));
-    add("CUPS", val("f-cups"));
-    add("CAU", val("f-cau"));
-    add("Pot. contratada", val("f-potc"));
-    add("Pot. solicitada obra", val("f-poto"));
-    add("Pot. solicitada definitivo", val("f-potd"));
-    add("Obra", val("f-obra"));
-    add("Presupuesto", val("f-presupuesto"));
-    ROWS.forEach(function (row) {
-      var v = state[row.key];
-      if (!v) return;
-      if (row.extra && v === row.extra.trigger && state[row.key + "_EXTRA"]) v += " (" + state[row.key + "_EXTRA"] + ")";
-      add(row.label, v);
-    });
-    add("Inversor/es", val("fv-inv"));
-    add("N.º módulos", val("fv-mod"));
-    add("Potencia módulos", val("fv-pot"));
-    add("Protecciones AC/CC", val("fv-prot"));
-    add("Orientación/azimut", val("fv-az"));
-    add("Otros FV", val("fv-otros"));
-    return rows;
-  }
-
-  function downloadXlsx() {
-    if (typeof XLSX === "undefined") return false;
+  // ---- Excel export: same styled layout as HOJA DATOS. Piloto_rapido.xlsx
+  // (Scripts/build_ficha_xlsx.js) — letterhead, section bars, amber/yellow
+  // fills, logo — but filled with what the client actually entered.
+  function downloadStyledXlsx() {
+    if (typeof ExcelJS === "undefined") return Promise.resolve(false);
     try {
-      var rows = collectXlsxRows();
-      var ws = XLSX.utils.aoa_to_sheet(rows);
-      ws["!cols"] = [{ wch: 30 }, { wch: 40 }];
-      var wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Ficha");
+      var wb = new ExcelJS.Workbook();
+      var ws = wb.addWorksheet("Ficha", { views: [{ showGridLines: false }] });
+      ws.getColumn(1).width = 44;
+      ws.getColumn(2).width = 38;
+
+      var FONT = "Arial", ACCENT = "FF1B6FBF", YELLOW = "FFFFF2B2", AMBER = "FFFBD79A";
+      var r = 1;
+
+      function sectionTitle(text) {
+        var row = ws.getRow(r);
+        row.getCell(1).value = text;
+        ws.mergeCells(r, 1, r, 2);
+        row.getCell(1).font = { name: FONT, size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+        row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: ACCENT } };
+        row.getCell(1).alignment = { vertical: "middle", indent: 1 };
+        row.height = 19;
+        r++;
+      }
+      function note(text) {
+        ws.mergeCells(r, 1, r, 2);
+        var cell = ws.getCell(r, 1);
+        cell.value = text;
+        cell.font = { name: FONT, size: 9, italic: true, color: { argb: "FF6B7280" } };
+        cell.alignment = { wrapText: true, vertical: "middle" };
+        ws.getRow(r).height = 24;
+        r++;
+      }
+      function textRow(label, value, opts) {
+        opts = opts || {};
+        var labelCell = ws.getCell(r, 1);
+        labelCell.value = label;
+        labelCell.font = { name: FONT, size: 10, bold: true, color: { argb: "FF1F2937" } };
+        labelCell.alignment = { wrapText: false, vertical: "center" };
+        var valueCell = ws.getCell(r, 2);
+        valueCell.value = value || "";
+        valueCell.font = { name: FONT, size: 10, color: { argb: "FF1D4ED8" } };
+        valueCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: opts.amber ? AMBER : YELLOW } };
+        valueCell.alignment = { vertical: "center" };
+        r++;
+      }
+      function choiceRow(label, options, value) {
+        textRow(label, value);
+        var cell = ws.getCell(r - 1, 2);
+        cell.dataValidation = { type: "list", allowBlank: true, formulae: ['"' + options.join(",") + '"'], showErrorMessage: false };
+      }
+
+      ws.mergeCells(r, 1, r, 2);
+      var headerCell = ws.getCell(r, 1);
+      headerCell.value = "HOJA DE DATOS PROFESIONAL";
+      headerCell.font = { name: FONT, size: 16, bold: true, color: { argb: "FF000000" } };
+      headerCell.alignment = { horizontal: "center", vertical: "middle" };
+      headerCell.border = { bottom: { style: "thin", color: { argb: "FF000000" } } };
+      ws.getRow(r).height = 26;
+      r++;
+
+      note("Ficha enviada desde " + location.hostname + " el " + new Date().toLocaleString("es-ES") + ".");
+
+      textRow("Fecha de toma de datos", val("f-fecha"));
+
+      sectionTitle("01 · Datos del cliente / promotor");
+      textRow("DNI / NIF / CIF", val("f-dni"));
+      textRow("Nombre y apellidos", val("f-nombre"));
+      textRow("Correo", val("f-correo"));
+      textRow("Teléfono", val("f-tel"));
+      textRow("N.º cuenta (si fuera necesario)", val("f-cc"));
+
+      sectionTitle("02 · Dirección del suministro / instalación");
+      textRow("Referencia catastral", val("f-catastral"));
+      textRow("Coordenada X", val("f-x"));
+      textRow("Coordenada Y", val("f-y"));
+      textRow("CUPS", val("f-cups"));
+      textRow("CAU", val("f-cau"));
+      textRow("Potencia contratada", val("f-potc"));
+      textRow("Pot. solicitada (obra)", val("f-poto"));
+      textRow("Pot. solicitada (definitivo)", val("f-potd"));
+
+      sectionTitle("03 · Encargo");
+      textRow("Explicar la obra / instalación, de forma breve", val("f-obra"));
+      textRow("Presupuesto", val("f-presupuesto"));
+
+      sectionTitle("04 · Datos de la instalación");
+      ROWS.forEach(function (row) {
+        if (row.freeText) {
+          textRow(row.label, state[row.key], { amber: !!row.required });
+          return;
+        }
+        var v = state[row.key];
+        if (row.extra && v === row.extra.trigger && state[row.key + "_EXTRA"]) v += " (" + state[row.key + "_EXTRA"] + ")";
+        choiceRow(row.label, row.options, v);
+      });
+
+      sectionTitle("05 · Instalación fotovoltaica (solo si aplica)");
+      textRow("Inversor/es, modelo (pot. máx. admisible, kW)", val("fv-inv"));
+      textRow("N.º módulos FV (cómo están conectados, ej. 2 x 7)", val("fv-mod"));
+      textRow("Potencia de módulos FV (kW)", val("fv-pot"));
+      textRow("Protecciones en AC y en CC", val("fv-prot"));
+      textRow("Orientación de la IFV y azimut (si se conoce)", val("fv-az"));
+      textRow("Otros aspectos a añadir", val("fv-otros"));
+
+      var lastContentRow = r - 1;
+      for (var i = 1; i <= lastContentRow; i++) {
+        for (var c = 1; c <= 2; c++) {
+          var cell = ws.getCell(i, c);
+          if (cell.fill && cell.fill.fgColor) {
+            cell.border = { top: { style: "thin", color: { argb: "FFE5E7EB" } }, bottom: { style: "thin", color: { argb: "FFE5E7EB" } }, left: { style: "thin", color: { argb: "FFE5E7EB" } }, right: { style: "thin", color: { argb: "FFE5E7EB" } } };
+          }
+        }
+      }
+
+      r++;
+      var footerRow = r;
+      ws.getRow(footerRow).height = 30;
+      ws.mergeCells(footerRow, 1, footerRow, 1);
+      var FOOTER_PAD = "        ";
+      var footerLeft = ws.getCell(footerRow, 1);
+      footerLeft.value = { richText: [
+        { font: { name: FONT, size: 9, bold: true, color: { argb: "FF1F2937" } }, text: FOOTER_PAD + "Germán Ortega Bermúdez\n" },
+        { font: { name: FONT, size: 8, color: { argb: "FF6B7280" } }, text: FOOTER_PAD + "Ingeniero Industrial · Graduado Ingeniería Eléctrica · ITI" },
+      ] };
+      footerLeft.alignment = { wrapText: true, vertical: "middle" };
+
+      var footerRight = ws.getCell(footerRow, 2);
+      footerRight.value = { richText: [
+        { font: { name: FONT, size: 9, color: { argb: "FF6B7280" } }, text: "Toma de datos para expediente\n" },
+        { font: { name: FONT, size: 8, color: { argb: "FF9CA3AF" } }, text: "Rev. 2026" },
+      ] };
+      footerRight.alignment = { wrapText: true, vertical: "middle", horizontal: "right" };
+
+      var logoImg = document.querySelector(".brand img");
+      if (logoImg && logoImg.src && logoImg.src.indexOf("base64,") !== -1) {
+        var imageId = wb.addImage({ base64: logoImg.src, extension: "png" });
+        ws.addImage(imageId, { tl: { col: 0.05, row: footerRow - 1 + 0.1 }, ext: { width: 22, height: 22 } });
+      }
+
+      ws.pageSetup = {
+        paperSize: 9, orientation: "portrait",
+        fitToPage: true, fitToWidth: 1, fitToHeight: 1,
+        margins: { left: 0.4, right: 0.4, top: 0.4, bottom: 0.4, header: 0, footer: 0 },
+      };
+
       var safeName = (val("f-nombre") || "cliente").replace(/[^\w]+/g, "_").slice(0, 40);
-      XLSX.writeFile(wb, "Ficha_" + safeName + ".xlsx");
-      return true;
+      return wb.xlsx.writeBuffer().then(function (buffer) {
+        var blob = new Blob([buffer], { type: "application/octet-stream" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "Ficha_" + safeName + ".xlsx";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        return true;
+      });
     } catch (e) {
-      return false;
+      return Promise.resolve(false);
     }
   }
 
+  // window.open/location.href run synchronously in the click handler (before
+  // the async Excel generation) so mobile popup blockers never see a delay
+  // between the tap and the WhatsApp/Mail handoff.
   document.getElementById("btn-whatsapp").addEventListener("click", function () {
     var warned = warnIfMissing();
-    var downloaded = downloadXlsx();
-    if (!warned) setStatus(downloaded ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", downloaded ? "ok" : "warn");
     var text = buildSummary();
     window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
+    downloadStyledXlsx().then(function (ok) {
+      if (!warned) setStatus(ok ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", ok ? "ok" : "warn");
+    });
   });
 
   document.getElementById("btn-email").addEventListener("click", function () {
     var warned = warnIfMissing();
-    var downloaded = downloadXlsx();
-    if (!warned) setStatus(downloaded ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", downloaded ? "ok" : "warn");
     var text = buildSummary();
     var subject = "Ficha CIE-BT — " + (val("f-nombre") || val("f-fecha"));
     window.location.href = "mailto:ingeniera.gob@gmail.com?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text);
+    downloadStyledXlsx().then(function (ok) {
+      if (!warned) setStatus(ok ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", ok ? "ok" : "warn");
+    });
   });
 
   // ---- scroll progress ----
