@@ -18,6 +18,7 @@
 <meta name="twitter:title" content="Hoja de datos profesional">
 <meta name="twitter:description" content="Formulario para tomar los datos de un cliente en obra, de INGEGOB S.L.P.">
 <meta name="twitter:image" content="og-image.png">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <style>
@@ -255,6 +256,9 @@
   .btn-primary { background: var(--accent); color: var(--accent-ink); }
   .btn-secondary { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
   .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .hint-send {
+    font-size: 11.5px; color: var(--ink-faint); text-align: center; padding-top: 6px;
+  }
   .status {
     font-size: 12.5px; color: var(--ink-soft); text-align: center; min-height: 16px;
   }
@@ -348,10 +352,10 @@
 <div class="actions">
   <div class="actions-inner">
     <div class="btn-row">
-      <button class="btn btn-primary" id="btn-copy">Copiar resumen</button>
-      <button class="btn btn-secondary" id="btn-whatsapp">WhatsApp</button>
+      <button class="btn btn-primary" id="btn-whatsapp">WhatsApp</button>
+      <button class="btn btn-secondary" id="btn-email">Enviar por email</button>
     </div>
-    <button class="btn btn-secondary" id="btn-email">Enviar por email</button>
+    <div class="hint-send">Se descargará un Excel con tus datos — adjúntalo al mensaje antes de enviarlo.</div>
     <div class="status" id="status"></div>
   </div>
 </div>
@@ -543,38 +547,75 @@
   function warnIfMissing() {
     var missing = missingRequired();
     if (missing.length) {
-      setStatus("Falta: " + missing.join(", ") + " — se ha copiado igualmente", "warn");
+      setStatus("Falta: " + missing.join(", "), "warn");
       return true;
     }
     return false;
   }
 
-  document.getElementById("btn-copy").addEventListener("click", function () {
-    var text = buildSummary();
-    var warned = warnIfMissing();
-    function ok() { if (!warned) setStatus("Resumen copiado — pégalo donde quieras enviarlo", "ok"); }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(ok).catch(function () { fallbackCopy(text, ok); });
-    } else {
-      fallbackCopy(text, ok);
+  // ---- Excel export (same field list as buildSummary, flat rows for fast reading) ----
+  function collectXlsxRows() {
+    var rows = [];
+    function add(label, v) { if (v) rows.push([label, v]); }
+    add("Fecha", val("f-fecha"));
+    add("DNI/NIF/CIF", val("f-dni"));
+    add("Nombre", val("f-nombre"));
+    add("Correo", val("f-correo"));
+    add("Teléfono", val("f-tel"));
+    add("N.º cuenta", val("f-cc"));
+    add("Ref. catastral", val("f-catastral"));
+    add("Coordenada X", val("f-x"));
+    add("Coordenada Y", val("f-y"));
+    add("CUPS", val("f-cups"));
+    add("CAU", val("f-cau"));
+    add("Pot. contratada", val("f-potc"));
+    add("Pot. solicitada obra", val("f-poto"));
+    add("Pot. solicitada definitivo", val("f-potd"));
+    add("Obra", val("f-obra"));
+    add("Presupuesto", val("f-presupuesto"));
+    ROWS.forEach(function (row) {
+      var v = state[row.key];
+      if (!v) return;
+      if (row.extra && v === row.extra.trigger && state[row.key + "_EXTRA"]) v += " (" + state[row.key + "_EXTRA"] + ")";
+      add(row.label, v);
+    });
+    add("Inversor/es", val("fv-inv"));
+    add("N.º módulos", val("fv-mod"));
+    add("Potencia módulos", val("fv-pot"));
+    add("Protecciones AC/CC", val("fv-prot"));
+    add("Orientación/azimut", val("fv-az"));
+    add("Otros FV", val("fv-otros"));
+    return rows;
+  }
+
+  function downloadXlsx() {
+    if (typeof XLSX === "undefined") return false;
+    try {
+      var rows = collectXlsxRows();
+      var ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 30 }, { wch: 40 }];
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Ficha");
+      var safeName = (val("f-nombre") || "cliente").replace(/[^\w]+/g, "_").slice(0, 40);
+      XLSX.writeFile(wb, "Ficha_" + safeName + ".xlsx");
+      return true;
+    } catch (e) {
+      return false;
     }
-  });
-  function fallbackCopy(text, cb) {
-    var ta = document.createElement("textarea");
-    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    try { document.execCommand("copy"); cb(); } catch (e) { setStatus("No se pudo copiar — selecciona el texto a mano", "warn"); }
-    document.body.removeChild(ta);
   }
 
   document.getElementById("btn-whatsapp").addEventListener("click", function () {
-    warnIfMissing();
+    var warned = warnIfMissing();
+    var downloaded = downloadXlsx();
+    if (!warned) setStatus(downloaded ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", downloaded ? "ok" : "warn");
     var text = buildSummary();
     window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
   });
 
   document.getElementById("btn-email").addEventListener("click", function () {
-    warnIfMissing();
+    var warned = warnIfMissing();
+    var downloaded = downloadXlsx();
+    if (!warned) setStatus(downloaded ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", downloaded ? "ok" : "warn");
     var text = buildSummary();
     var subject = "Ficha CIE-BT — " + (val("f-nombre") || val("f-fecha"));
     window.location.href = "mailto:ingeniera.gob@gmail.com?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text);
