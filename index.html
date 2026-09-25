@@ -363,10 +363,9 @@
       <button class="btn btn-primary" id="btn-next" style="grid-column: 1 / -1;">Siguiente</button>
     </div>
     <div class="btn-row" id="send-row" hidden>
-      <button class="btn btn-primary" id="btn-whatsapp">WhatsApp</button>
-      <button class="btn btn-secondary" id="btn-email">Enviar por email</button>
+      <button class="btn btn-primary" id="btn-whatsapp" style="grid-column: 1 / -1;">Enviar el archivo descargado</button>
     </div>
-    <div class="hint-send" id="hint-send" hidden>Se descargará un Excel con tus datos — adjúntalo al mensaje antes de enviarlo.</div>
+    <div class="hint-send" id="hint-send" hidden>Se descargará un Excel con tus datos — pulsa aquí, se abrirá WhatsApp y solo tienes que adjuntar el archivo antes de enviarlo.</div>
     <div class="status" id="status"></div>
   </div>
 </div>
@@ -729,23 +728,13 @@
     }
   }
 
-  // window.open/location.href run synchronously in the click handler (before
-  // the async Excel generation) so mobile popup blockers never see a delay
-  // between the tap and the WhatsApp/Mail handoff.
+  // window.open runs synchronously in the click handler (before the async
+  // Excel generation) so mobile popup blockers never see a delay between the
+  // tap and the WhatsApp handoff.
   document.getElementById("btn-whatsapp").addEventListener("click", function () {
     var warned = warnIfMissing();
     var text = buildSummary();
     window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
-    downloadStyledXlsx().then(function (ok) {
-      if (!warned) setStatus(ok ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", ok ? "ok" : "warn");
-    });
-  });
-
-  document.getElementById("btn-email").addEventListener("click", function () {
-    var warned = warnIfMissing();
-    var text = buildSummary();
-    var subject = "Ficha CIE-BT — " + (val("f-nombre") || val("f-fecha"));
-    window.location.href = "mailto:ingeniera.gob@gmail.com?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text);
     downloadStyledXlsx().then(function (ok) {
       if (!warned) setStatus(ok ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", ok ? "ok" : "warn");
     });
