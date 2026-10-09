@@ -365,7 +365,7 @@
     <div class="btn-row" id="send-row" hidden>
       <button class="btn btn-primary" id="btn-whatsapp" style="grid-column: 1 / -1;">Enviar el archivo descargado</button>
     </div>
-    <div class="hint-send" id="hint-send" hidden>Se descargará un Excel con tus datos — pulsa aquí, se abrirá WhatsApp y solo tienes que adjuntar el archivo antes de enviarlo.</div>
+    <div class="hint-send" id="hint-send" hidden>Se crea el Excel con tus datos y se abre el menú de compartir: elige WhatsApp y el archivo ya va adjunto. Si tu dispositivo no lo permite, se descargará y se abrirá WhatsApp para que lo adjuntes.</div>
     <div class="status" id="status"></div>
   </div>
 </div>
@@ -489,61 +489,6 @@
   // ---- summary builder (mirrors Scripts/read_ficha_pdf.js output style) ----
   function val(id) { return document.getElementById(id).value.trim(); }
 
-  function buildSummary() {
-    var lines = [];
-    lines.push("FICHA CIE-BT — " + val("f-fecha"));
-    lines.push("");
-    lines.push("=== DATOS DEL CLIENTE ===");
-    pushField(lines, "DNI/NIF/CIF", val("f-dni"));
-    pushField(lines, "Nombre", val("f-nombre"));
-    pushField(lines, "Correo", val("f-correo"));
-    pushField(lines, "Teléfono", val("f-tel"));
-    pushField(lines, "N.º cuenta", val("f-cc"));
-
-    lines.push("");
-    lines.push("=== DIRECCIÓN / SUMINISTRO ===");
-    pushField(lines, "Ref. catastral", val("f-catastral"));
-    pushField(lines, "Coordenadas", (val("f-x") || val("f-y")) ? ("X: " + val("f-x") + "  Y: " + val("f-y")) : "");
-    pushField(lines, "CUPS", val("f-cups"));
-    pushField(lines, "CAU", val("f-cau"));
-    pushField(lines, "Pot. contratada", val("f-potc"));
-    pushField(lines, "Pot. solicitada obra", val("f-poto"));
-    pushField(lines, "Pot. solicitada definitivo", val("f-potd"));
-
-    lines.push("");
-    lines.push("=== ENCARGO ===");
-    pushField(lines, "Obra", val("f-obra"));
-    pushField(lines, "Presupuesto", val("f-presupuesto"));
-
-    lines.push("");
-    lines.push("=== DATOS DE LA INSTALACIÓN ===");
-    ROWS.forEach(function (row) {
-      var v = state[row.key];
-      if (!v) return;
-      if (row.extra && v === row.extra.trigger && state[row.key + "_EXTRA"]) {
-        v += " (" + state[row.key + "_EXTRA"] + ")";
-      }
-      pushField(lines, row.label, v);
-    });
-
-    var fvAny = ["fv-inv", "fv-mod", "fv-pot", "fv-prot", "fv-az", "fv-otros"].some(function (id) { return val(id); });
-    if (fvAny) {
-      lines.push("");
-      lines.push("=== FOTOVOLTAICA ===");
-      pushField(lines, "Inversor/es", val("fv-inv"));
-      pushField(lines, "N.º módulos", val("fv-mod"));
-      pushField(lines, "Potencia módulos", val("fv-pot"));
-      pushField(lines, "Protecciones AC/CC", val("fv-prot"));
-      pushField(lines, "Orientación/azimut", val("fv-az"));
-      pushField(lines, "Otros", val("fv-otros"));
-    }
-
-    return lines.join("\n");
-  }
-  function pushField(lines, label, v) {
-    if (v) lines.push(label + ": " + v);
-  }
-
   function missingRequired() {
     return ROWS.filter(function (r) { return r.required && !state[r.key]; }).map(function (r) { return r.label; });
   }
@@ -567,8 +512,9 @@
   // ---- Excel export: same styled layout as HOJA DATOS. Piloto_rapido.xlsx
   // (Scripts/build_ficha_xlsx.js) — letterhead, section bars, amber/yellow
   // fills, logo — but filled with what the client actually entered.
-  function downloadStyledXlsx() {
-    if (typeof ExcelJS === "undefined") return Promise.resolve(false);
+  var XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  function buildStyledXlsx() {
+    if (typeof ExcelJS === "undefined") return Promise.resolve(null);
     try {
       var wb = new ExcelJS.Workbook();
       var ws = wb.addWorksheet("Ficha", { views: [{ showGridLines: false }] });
@@ -712,33 +658,94 @@
 
       var safeName = (val("f-nombre") || "cliente").replace(/[^\w]+/g, "_").slice(0, 40);
       return wb.xlsx.writeBuffer().then(function (buffer) {
-        var blob = new Blob([buffer], { type: "application/octet-stream" });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = "Ficha_" + safeName + ".xlsx";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-        return true;
-      });
+        return new File([buffer], "Ficha_" + safeName + ".xlsx", { type: XLSX_MIME });
+      }).catch(function () { return null; });
     } catch (e) {
-      return Promise.resolve(false);
+      return Promise.resolve(null);
     }
   }
 
-  // window.open runs synchronously in the click handler (before the async
-  // Excel generation) so mobile popup blockers never see a delay between the
-  // tap and the WhatsApp handoff.
-  document.getElementById("btn-whatsapp").addEventListener("click", function () {
+  function saveFile(file) {
+    var url = URL.createObjectURL(file);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  }
+
+  // Sending: the Excel is the thing that gets sent. On phones the native share
+  // sheet takes the file itself (WhatsApp, mail, Drive...), so it arrives
+  // attached — no hunting for it in Downloads. Where file sharing isn't
+  // available (most desktops) the Excel is downloaded and WhatsApp opens with
+  // a short note that carries no field data, so there is nothing to send
+  // except the attachment.
+  //
+  // navigator.share needs a recent user gesture, so the file is built ahead
+  // of time (when the last step opens and after edits there) and the tap
+  // shares it synchronously instead of waiting on ExcelJS.
+  var prepared = null;       // { sig, file }
+  var preparing = null;      // { sig, promise }
+  var prepareTimer = null;
+
+  function formSignature() {
+    var v = collectAllFieldValues();
+    delete v.ultima_actualizacion;
+    return JSON.stringify(v);
+  }
+  function prepareFile() {
+    var sig = formSignature();
+    if (prepared && prepared.sig === sig) return Promise.resolve(prepared.file);
+    if (preparing && preparing.sig === sig) return preparing.promise;
+    var p = buildStyledXlsx().then(function (file) {
+      if (file) prepared = { sig: sig, file: file };
+      if (preparing && preparing.sig === sig) preparing = null;
+      return file;
+    });
+    preparing = { sig: sig, promise: p };
+    return p;
+  }
+  function schedulePrepare() {
+    clearTimeout(prepareTimer);
+    prepareTimer = setTimeout(function () { if (currentStep === STEPS.length - 1) prepareFile(); }, 500);
+  }
+
+  function shareOrDownload(file, warned) {
+    var nombre = val("f-nombre") || val("f-fecha");
+    var caption = "Ficha CIE-BT — " + nombre + ". Te adjunto el Excel con todos los datos.";
+    var ok = function (t) { if (!warned) setStatus(t, "ok"); };
+    var warn = function (t) { if (!warned) setStatus(t, "warn"); };
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: "Ficha CIE-BT", text: caption }).then(function () {
+        ok("Listo — Excel enviado");
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") { warn("Envío cancelado — pulsa de nuevo cuando quieras enviarlo"); return; }
+        saveFile(file);
+        warn("No se pudo abrir el menú de compartir — Excel descargado, adjúntalo en WhatsApp");
+      });
+    }
+    saveFile(file);
+    ok("Excel descargado — adjúntalo en el mensaje de WhatsApp");
+    try { window.open("https://wa.me/?text=" + encodeURIComponent(caption), "_blank"); } catch (e) {}
+  }
+
+  var sendBtn = document.getElementById("btn-whatsapp");
+  sendBtn.addEventListener("click", function () {
     var warned = warnIfMissing();
-    var text = buildSummary();
-    window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
-    downloadStyledXlsx().then(function (ok) {
-      if (!warned) setStatus(ok ? "Excel descargado — adjúntalo antes de enviar" : "No se pudo generar el Excel, se envía solo el texto", ok ? "ok" : "warn");
+    var sig = formSignature();
+    if (prepared && prepared.sig === sig) { shareOrDownload(prepared.file, warned); return; }
+    sendBtn.disabled = true;
+    if (!warned) setStatus("Preparando tu Excel…");
+    prepareFile().then(function (file) {
+      sendBtn.disabled = false;
+      if (!file) { setStatus("No se pudo generar el Excel, avisa a Germán", "warn"); return; }
+      shareOrDownload(file, warned);
     });
   });
+  document.addEventListener("input", function () { if (currentStep === STEPS.length - 1) schedulePrepare(); });
 
   // ---- paged steps ----
   var bar = document.getElementById("progress-bar");
@@ -771,6 +778,7 @@
     stepLabel.textContent = "Paso " + (currentStep + 1) + " de " + STEPS.length + " — " + STEP_TITLES[currentStep];
     updateProgress();
     window.scrollTo(0, 0);
+    if (last) prepareFile();
   }
 
   btnBack.addEventListener("click", function () { showStep(currentStep - 1); });
